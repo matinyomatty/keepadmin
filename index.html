@@ -142,20 +142,21 @@
                     </div>
                 </div>
                 <div class="border-t border-slate-800 pt-4">
-                    <p class="text-xs font-semibold text-white mb-3">Shop owner's login <span class="text-slate-500 font-normal">(they add their own staff later from the POS)</span></p>
+                    <p class="text-xs font-semibold text-white mb-1">Shop owner</p>
+                    <p class="text-xs text-slate-500 mb-3">They get an email with a link to set their own PIN. They then add their sellers from the POS.</p>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-xs font-medium text-slate-300 mb-1">Owner's name</label>
                             <input id="pv-owner" required placeholder="e.g. Asha Mohamed" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-slate-300 mb-1">Username</label>
-                            <input id="pv-user" required value="owner" pattern="[a-z0-9_\-]{2,20}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white lowercase focus:outline-none focus:border-purple-500">
+                            <label class="block text-xs font-medium text-slate-300 mb-1">Phone <span class="text-slate-500">(optional — can sign in with it)</span></label>
+                            <input id="pv-phone" type="tel" placeholder="07XX XXX XXX" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
                         </div>
                     </div>
                     <div class="mt-3">
-                        <label class="block text-xs font-medium text-slate-300 mb-1">PIN <span class="text-slate-500">(6–12 digits — give this to the owner)</span></label>
-                        <input id="pv-password" required pattern="[0-9]{6,12}" inputmode="numeric" type="text" autocomplete="off" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Owner's email</label>
+                        <input id="pv-email" required type="email" placeholder="owner@example.com" autocapitalize="none" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
                     </div>
                 </div>
                 <p id="pv-error" class="text-xs text-red-400 hidden"></p>
@@ -185,6 +186,8 @@
         // Only this account can open the Control Center (also enforced in Firestore rules).
         const VENDOR_EMAIL = 'maternusadriano@gmail.com';
         const SHOP_DOMAIN = 'tenants.matinyopos.app';
+        // Where shop staff open the till (used in the welcome WhatsApp message)
+        const TILL_URL = 'https://matinyomatty.github.io/postz/';
 
         let tenants = [];
         let unsubscribe = null;
@@ -280,7 +283,7 @@
                 const last = t.lastSaleAt?.toDate ? t.lastSaleAt.toDate().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—';
                 return `<tr class="hover:bg-slate-800/30">
                     <td class="p-3.5 font-bold text-white">${esc(t.id)}</td>
-                    <td class="p-3.5 text-slate-300">${esc(t.name)}</td>
+                    <td class="p-3.5 text-slate-300">${esc(t.name)}<div class="text-[11px] text-slate-500">${esc(t.ownerName || '')}${t.ownerEmail ? ' · ' + esc(t.ownerEmail) : ''}</div></td>
                     <td class="p-3.5 text-purple-400 font-semibold">${esc(t.plan)}</td>
                     <td class="p-3.5 text-right text-slate-300">${fmt(t.monthlyFee)}</td>
                     <td class="p-3.5 text-right text-slate-300">${(t.txnCount || 0).toLocaleString('en-US')}</td>
@@ -289,6 +292,7 @@
                         ? '<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-semibold">Active</span>'
                         : '<span class="bg-red-500/10 text-red-400 border border-red-500/20 px-2.5 py-1 rounded-full font-semibold">Suspended</span>'}</td>
                     <td class="p-3.5 text-right whitespace-nowrap space-x-3">
+                        <button onclick="resendPin('${t.id}')" class="text-sky-400 hover:text-sky-300 font-semibold">Resend PIN</button>
                         <button onclick="editPlan('${t.id}')" class="text-purple-400 hover:text-purple-300 font-semibold">Edit Plan</button>
                         <button onclick="toggleStatus('${t.id}')" class="${on ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'} font-semibold">${on ? 'Suspend' : 'Activate'}</button>
                     </td>
@@ -333,6 +337,13 @@
             document.getElementById('provision-modal').classList.add('hidden');
         }
 
+        function normPhone(v) {
+            let d = String(v || '').replace(/\D/g, '');
+            if (d.startsWith('0') && d.length === 10) d = '255' + d.slice(1);
+            else if (d.length === 9 && /^[67]/.test(d)) d = '255' + d;
+            return d;
+        }
+
         async function provisionTenant(e) {
             e.preventDefault();
             showError('pv-error', '');
@@ -340,51 +351,77 @@
             const name = document.getElementById('pv-name').value.trim();
             const plan = document.getElementById('pv-plan').value;
             const fee = Number(document.getElementById('pv-fee').value);
-            const password = document.getElementById('pv-password').value.trim();
             const ownerName = document.getElementById('pv-owner').value.trim();
-            const username = document.getElementById('pv-user').value.trim().toLowerCase();
+            const ownerEmail = document.getElementById('pv-email').value.trim().toLowerCase();
+            const ownerPhone = normPhone(document.getElementById('pv-phone').value);
 
             if (!/^[a-z0-9][a-z0-9-]{2,29}$/.test(code)) return showError('pv-error', 'Shop code must be 3–30 characters: lowercase letters, numbers and dashes.');
             if (!ownerName) return showError('pv-error', "Enter the owner's name.");
-            if (!/^[a-z0-9_-]{2,20}$/.test(username)) return showError('pv-error', 'Username: 2–20 lowercase letters or numbers, no spaces.');
-            if (!/^[0-9]{6,12}$/.test(password)) return showError('pv-error', 'PIN must be 6 to 12 digits.');
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail)) return showError('pv-error', "Enter the owner's email address.");
+            if (ownerPhone && !/^\d{10,15}$/.test(ownerPhone)) return showError('pv-error', 'Phone number looks wrong — e.g. 0712 345 678.');
             if (tenants.some(t => t.id === code)) return showError('pv-error', 'That shop code is already taken.');
 
             const btn = document.getElementById('pv-btn');
             btn.disabled = true; btn.textContent = 'Creating...';
             try {
-                // 1) Create the shop's login using a separate Firebase instance,
-                //    so the owner stays signed in here.
+                if (ownerPhone && (await db.collection('logins').doc(ownerPhone).get()).exists)
+                    return showError('pv-error', 'That phone number is already used by another account.');
+
+                // 1) Create the owner's login with a random temporary password, using a
+                //    separate Firebase instance so you stay signed in here.
                 const helper = firebase.apps.find(a => a.name === 'provisioner') || firebase.initializeApp(firebaseConfig, 'provisioner');
                 await helper.auth().setPersistence(firebase.auth.Auth.Persistence.NONE);
-                const cred = await helper.auth().createUserWithEmailAndPassword(`${code}.${username}@${SHOP_DOMAIN}`, password);
+                const temp = Array.from(crypto.getRandomValues(new Uint8Array(18))).map(b => b.toString(36)).join('');
+                const cred = await helper.auth().createUserWithEmailAndPassword(ownerEmail, temp);
                 const ownerUid = cred.user.uid;
                 await helper.auth().signOut();
 
-                // 2) Create the shop record and the owner's admin staff record together.
+                // 2) Shop record, owner's admin record, and sign-in links — all together.
                 const batch = db.batch();
                 batch.set(db.collection('tenants').doc(code), {
-                    name, plan, monthlyFee: fee,
-                    status: 'active',
-                    txnCount: 0,
+                    name, plan, monthlyFee: fee, status: 'active', txnCount: 0,
+                    ownerName, ownerEmail, ownerPhone: ownerPhone || null, ownerUid,
                     createdAt: FV.serverTimestamp()
                 });
                 batch.set(db.collection('tenants').doc(code).collection('staff').doc(ownerUid), {
-                    username, name: ownerName, role: 'admin', active: true,
+                    name: ownerName, loginId: ownerEmail, role: 'admin', active: true,
                     createdAt: FV.serverTimestamp(), createdBy: 'Matinyo'
                 });
+                batch.set(db.collection('users').doc(ownerUid), { shop: code });
+                if (ownerPhone) batch.set(db.collection('logins').doc(ownerPhone), { email: ownerEmail, shop: code, uid: ownerUid });
                 await batch.commit();
 
+                // 3) Email the owner a link to set their own PIN.
+                await auth.sendPasswordResetEmail(ownerEmail);
+
                 closeProvisionModal();
-                alert(`Shop created!\n\nGive these sign-in details to ${ownerName}:\n\nShop code: ${code}\nUsername: ${username}\nPIN: ${password}`);
+                welcomeOwner({ name, ownerName, ownerEmail, ownerPhone }, true);
             } catch (err) {
                 const c = err.code || '';
                 showError('pv-error', c.includes('email-already-in-use')
-                    ? 'That login already exists. Pick another shop code or username, or delete the old user in Firebase → Authentication → Users first.'
+                    ? 'That email already has a Matinyo account. Use a different email, or delete the old user in Firebase → Authentication → Users.'
                     : 'Could not create shop: ' + err.message);
             } finally {
                 btn.disabled = false; btn.textContent = 'Create Shop Workspace';
             }
+        }
+
+        // Tell the owner their shop is ready (email already sent; WhatsApp optional)
+        function welcomeOwner(t, isNew) {
+            const msg = `${isNew ? 'Shop created! ' : ''}An email with a link to set a new PIN was sent to ${t.ownerEmail}.`;
+            if (!t.ownerPhone) { alert(msg + '\n\nAsk them to check their spam folder if it does not arrive.'); return; }
+            if (confirm(msg + '\n\nAlso send them a WhatsApp message with the sign-in steps?')) {
+                const text = `Habari ${String(t.ownerName || '').split(' ')[0]}! ${isNew ? `Your shop *${t.name}* is ready on Matinyo POS.` : 'Here is how to set a new PIN for Matinyo POS.'}\n\n1. Open the email we sent to ${t.ownerEmail} (check spam) and set your PIN.\n2. Open the till: ${TILL_URL}\n3. Sign in with your email or this phone number, and your PIN.`;
+                window.open(`https://wa.me/${t.ownerPhone}?text=${encodeURIComponent(text)}`, '_blank');
+            }
+        }
+
+        async function resendPin(id) {
+            const t = tenants.find(x => x.id === id);
+            if (!t || !t.ownerEmail) return toast('This shop has no owner email on record. Re-create it in the new format.', 'err');
+            if (!confirm(`Send ${t.ownerName || 'the owner'} a new "set your PIN" email at ${t.ownerEmail}?`)) return;
+            try { await auth.sendPasswordResetEmail(t.ownerEmail); welcomeOwner(t, false); }
+            catch (e) { toast('Could not send: ' + e.message, 'err'); }
         }
     </script>
 </body>
