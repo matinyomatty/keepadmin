@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matinyo POS - Software Vendor Master Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- OWNER SIGN-IN -->
+    <div id="auth-screen" class="fixed inset-0 bg-slate-950 z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6 shadow-2xl">
+            <div class="text-center mb-6">
+                <div class="bg-purple-600 w-14 h-14 rounded-2xl mx-auto flex items-center justify-center text-white text-2xl shadow-xl shadow-purple-600/30 mb-3">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <h2 class="text-xl font-bold text-white">Matinyo SaaS Control Center</h2>
+                <p class="text-xs text-slate-400 mt-1">Owner access only</p>
+            </div>
+            <form onsubmit="handleLogin(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Owner Email</label>
+                    <input type="email" id="login-email" required autocomplete="username" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Password</label>
+                    <input type="password" id="login-password" required autocomplete="current-password" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                </div>
+                <p id="login-error" class="text-xs text-red-400 hidden"></p>
+                <button type="submit" id="login-btn" class="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white font-semibold py-3 rounded-xl transition shadow-lg shadow-purple-600/20">SIGN IN AS OWNER</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- VENDOR TOP BAR -->
+    <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center z-20">
+        <div class="flex items-center space-x-3">
+            <div class="bg-purple-600 text-white p-2.5 rounded-xl font-bold flex items-center justify-center shadow-lg shadow-purple-600/30">
+                <i class="fa-solid fa-shield-halved text-lg"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg text-white leading-tight">Matinyo SaaS Control Center</h1>
+                <p class="text-xs text-purple-400 font-medium">Software Vendor Super-Admin Module</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-3">
+            <span class="hidden sm:inline text-xs bg-purple-500/10 text-purple-400 border border-purple-500/20 px-3 py-1.5 rounded-full font-semibold">
+                <i class="fa-solid fa-lock mr-1.5"></i> <span id="owner-email">Master Access Verified</span>
+            </span>
+            <button onclick="auth.signOut()" title="Sign out" class="text-slate-400 hover:text-red-400 p-2 rounded-lg transition"><i class="fa-solid fa-power-off"></i></button>
+        </div>
+    </header>
+
+    <!-- MAIN VENDOR DASHBOARD -->
+    <main class="flex-1 p-6 overflow-y-auto max-w-7xl mx-auto w-full space-y-6">
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                <p class="text-xs font-medium text-slate-400">Total Active Tenants</p>
+                <h3 class="text-3xl font-bold text-white mt-1" id="stat-tenants">–</h3>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                <p class="text-xs font-medium text-slate-400">Monthly Recurring Revenue</p>
+                <h3 class="text-3xl font-bold text-emerald-400 mt-1" id="stat-mrr">–</h3>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                <p class="text-xs font-medium text-slate-400">Total Cloud Transactions</p>
+                <h3 class="text-3xl font-bold text-purple-400 mt-1" id="stat-txns">–</h3>
+            </div>
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+                <p class="text-xs font-medium text-slate-400">System Health Status</p>
+                <h3 id="stat-health" class="text-lg font-bold text-slate-400 mt-2 flex items-center">
+                    <i class="fa-solid fa-circle text-xs mr-2"></i> Connecting...
+                </h3>
+            </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
+                <div>
+                    <h2 class="text-base font-bold text-white">Tenant Registry &amp; Licensing</h2>
+                    <p class="text-xs text-slate-400">Manage client subscriptions, activate/suspend shops, and provision new workspaces.</p>
+                </div>
+                <button onclick="openProvisionModal()" class="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-xl text-xs font-semibold transition shadow-lg shadow-purple-600/20 flex items-center justify-center">
+                    <i class="fa-solid fa-plus mr-2"></i> Provision New Tenant
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead>
+                        <tr class="bg-slate-950/50 text-slate-400 border-b border-slate-800">
+                            <th class="p-3.5 font-semibold">Shop Code</th>
+                            <th class="p-3.5 font-semibold">Business Name</th>
+                            <th class="p-3.5 font-semibold">Plan</th>
+                            <th class="p-3.5 font-semibold text-right">Monthly Fee</th>
+                            <th class="p-3.5 font-semibold text-right">Transactions</th>
+                            <th class="p-3.5 font-semibold">Last Sale</th>
+                            <th class="p-3.5 font-semibold">Status</th>
+                            <th class="p-3.5 font-semibold text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tenant-table-body" class="divide-y divide-slate-800"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- PROVISION MODAL -->
+    <div id="provision-modal" class="fixed inset-0 bg-black/70 z-40 hidden flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-5">
+                <h3 class="text-base font-bold text-white">Provision New Tenant</h3>
+                <button onclick="closeProvisionModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="provision-form" onsubmit="provisionTenant(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Shop Code <span class="text-slate-500">(lowercase letters, numbers, dashes — the shop types this to sign in)</span></label>
+                    <input id="pv-code" required pattern="[a-z0-9][a-z0-9\-]{2,29}" placeholder="e.g. mwanza-store" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white lowercase focus:outline-none focus:border-purple-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Business Name</label>
+                    <input id="pv-name" required placeholder="e.g. Mwanza Minimart" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Plan</label>
+                        <select id="pv-plan" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                            <option>Starter</option>
+                            <option>Business</option>
+                            <option selected>Enterprise Pro</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Fee (TZS)</label>
+                        <input id="pv-fee" required type="number" min="0" step="1000" value="100000" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                    </div>
+                </div>
+                <div class="border-t border-slate-800 pt-4">
+                    <p class="text-xs font-semibold text-white mb-3">Shop owner's login <span class="text-slate-500 font-normal">(they add their own staff later from the POS)</span></p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">Owner's name</label>
+                            <input id="pv-owner" required placeholder="e.g. Asha Mohamed" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-300 mb-1">Username</label>
+                            <input id="pv-user" required value="owner" pattern="[a-z0-9_\-]{2,20}" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white lowercase focus:outline-none focus:border-purple-500">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="block text-xs font-medium text-slate-300 mb-1">PIN <span class="text-slate-500">(6–12 digits — give this to the owner)</span></label>
+                        <input id="pv-password" required pattern="[0-9]{6,12}" inputmode="numeric" type="text" autocomplete="off" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-purple-500">
+                    </div>
+                </div>
+                <p id="pv-error" class="text-xs text-red-400 hidden"></p>
+                <button id="pv-btn" class="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white font-semibold py-3 rounded-xl transition">Create Shop Workspace</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-xl hidden z-[60]"></div>
+
+    <script>
+        // ===== FIREBASE SETUP =====
+        const firebaseConfig = {
+            apiKey: "AIzaSyCaDZILjLrWg2VGvFElzU08Je-kJTGHKiU",
+            authDomain: "matinyopos.firebaseapp.com",
+            projectId: "matinyopos",
+            storageBucket: "matinyopos.firebasestorage.app",
+            messagingSenderId: "891386548810",
+            appId: "1:891386548810:web:26f1ef407a053a3f6f4cb3",
+            measurementId: "G-FSDR5WGPFD"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const FV = firebase.firestore.FieldValue;
+
+        // Only this account can open the Control Center (also enforced in Firestore rules).
+        const VENDOR_EMAIL = 'maternusadriano@gmail.com';
+        const SHOP_DOMAIN = 'tenants.matinyopos.app';
+
+        let tenants = [];
+        let unsubscribe = null;
+
+        const fmt = n => 'TZS ' + Math.round(n || 0).toLocaleString('en-US');
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        function toast(msg, type = 'ok') {
+            const el = document.getElementById('toast');
+            el.textContent = msg;
+            el.className = 'fixed bottom-5 left-1/2 -translate-x-1/2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-xl z-[60] ' +
+                (type === 'err' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white');
+            clearTimeout(el._t);
+            el._t = setTimeout(() => el.classList.add('hidden'), 4000);
+        }
+        function showError(id, msg) {
+            const el = document.getElementById(id);
+            el.textContent = msg || '';
+            el.classList.toggle('hidden', !msg);
+        }
+
+        // ===== AUTH =====
+        async function handleLogin(e) {
+            e.preventDefault();
+            showError('login-error', '');
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true; btn.textContent = 'Signing in...';
+            try {
+                await auth.signInWithEmailAndPassword(
+                    document.getElementById('login-email').value.trim(),
+                    document.getElementById('login-password').value
+                );
+            } catch (err) {
+                const c = err.code || '';
+                showError('login-error',
+                    (c.includes('credential') || c.includes('password') || c.includes('user-not-found')) ? 'Wrong email or password.' :
+                    c.includes('too-many-requests') ? 'Too many attempts. Wait a few minutes and try again.' :
+                    c.includes('network') ? 'No internet connection.' :
+                    'Sign in failed: ' + err.message);
+            } finally {
+                btn.disabled = false; btn.textContent = 'SIGN IN AS OWNER';
+            }
+        }
+
+        auth.onAuthStateChanged(async user => {
+            if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+            if (!user) {
+                document.getElementById('auth-screen').classList.remove('hidden');
+                document.getElementById('login-password').value = '';
+                return;
+            }
+            if ((user.email || '').toLowerCase() !== VENDOR_EMAIL) {
+                await auth.signOut();
+                showError('login-error', 'This account does not have owner access.');
+                return;
+            }
+            showError('login-error', '');
+            document.getElementById('owner-email').textContent = user.email;
+            document.getElementById('auth-screen').classList.add('hidden');
+            startTenantListener();
+        });
+
+        // ===== TENANTS =====
+        function setHealth(ok, msg) {
+            const el = document.getElementById('stat-health');
+            el.className = 'text-lg font-bold mt-2 flex items-center ' + (ok ? 'text-emerald-400' : 'text-red-400');
+            el.innerHTML = `<i class="fa-solid fa-circle text-xs mr-2 ${ok ? 'animate-pulse' : ''}"></i> ${esc(msg)}`;
+        }
+        function startTenantListener() {
+            unsubscribe = db.collection('tenants').onSnapshot(snap => {
+                tenants = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+                    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+                setHealth(true, 'Operational');
+                render();
+            }, err => {
+                setHealth(false, 'Database error');
+                toast('Could not load tenants: ' + err.message, 'err');
+            });
+        }
+
+        function render() {
+            const active = tenants.filter(t => t.status === 'active');
+            document.getElementById('stat-tenants').textContent = active.length;
+            document.getElementById('stat-mrr').textContent = fmt(active.reduce((s, t) => s + (Number(t.monthlyFee) || 0), 0));
+            document.getElementById('stat-txns').textContent = tenants.reduce((s, t) => s + (t.txnCount || 0), 0).toLocaleString('en-US');
+
+            const body = document.getElementById('tenant-table-body');
+            if (!tenants.length) {
+                body.innerHTML = '<tr><td colspan="8" class="p-6 text-center text-slate-500">No tenants yet. Click "Provision New Tenant" to create the first shop.</td></tr>';
+                return;
+            }
+            body.innerHTML = tenants.map(t => {
+                const on = t.status === 'active';
+                const last = t.lastSaleAt?.toDate ? t.lastSaleAt.toDate().toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+                return `<tr class="hover:bg-slate-800/30">
+                    <td class="p-3.5 font-bold text-white">${esc(t.id)}</td>
+                    <td class="p-3.5 text-slate-300">${esc(t.name)}</td>
+                    <td class="p-3.5 text-purple-400 font-semibold">${esc(t.plan)}</td>
+                    <td class="p-3.5 text-right text-slate-300">${fmt(t.monthlyFee)}</td>
+                    <td class="p-3.5 text-right text-slate-300">${(t.txnCount || 0).toLocaleString('en-US')}</td>
+                    <td class="p-3.5 text-slate-400">${last}</td>
+                    <td class="p-3.5">${on
+                        ? '<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-semibold">Active</span>'
+                        : '<span class="bg-red-500/10 text-red-400 border border-red-500/20 px-2.5 py-1 rounded-full font-semibold">Suspended</span>'}</td>
+                    <td class="p-3.5 text-right whitespace-nowrap space-x-3">
+                        <button onclick="editPlan('${t.id}')" class="text-purple-400 hover:text-purple-300 font-semibold">Edit Plan</button>
+                        <button onclick="toggleStatus('${t.id}')" class="${on ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'} font-semibold">${on ? 'Suspend' : 'Activate'}</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        async function toggleStatus(id) {
+            const t = tenants.find(x => x.id === id);
+            const next = t.status === 'active' ? 'suspended' : 'active';
+            const warn = next === 'suspended'
+                ? `Suspend "${t.name}"? Their terminal will be signed out and they cannot sell until reactivated.`
+                : `Reactivate "${t.name}"?`;
+            if (!confirm(warn)) return;
+            try {
+                await db.collection('tenants').doc(id).update({ status: next, statusChangedAt: FV.serverTimestamp() });
+                toast(`${t.name} is now ${next}`);
+            } catch (err) { toast(err.message, 'err'); }
+        }
+
+        async function editPlan(id) {
+            const t = tenants.find(x => x.id === id);
+            const plan = prompt(`Plan for "${t.name}" (Starter, Business or Enterprise Pro):`, t.plan);
+            if (plan === null) return;
+            const fee = prompt(`Monthly fee for "${t.name}" (TZS):`, t.monthlyFee);
+            if (fee === null) return;
+            const n = Number(fee);
+            if (!Number.isFinite(n) || n < 0) return toast('Enter a valid fee', 'err');
+            try {
+                await db.collection('tenants').doc(id).update({ plan: plan.trim() || t.plan, monthlyFee: n });
+                toast('Plan updated');
+            } catch (err) { toast(err.message, 'err'); }
+        }
+
+        // ===== PROVISIONING =====
+        function openProvisionModal() {
+            document.getElementById('provision-form').reset();
+            showError('pv-error', '');
+            document.getElementById('provision-modal').classList.remove('hidden');
+        }
+        function closeProvisionModal() {
+            document.getElementById('provision-modal').classList.add('hidden');
+        }
+
+        async function provisionTenant(e) {
+            e.preventDefault();
+            showError('pv-error', '');
+            const code = document.getElementById('pv-code').value.trim().toLowerCase();
+            const name = document.getElementById('pv-name').value.trim();
+            const plan = document.getElementById('pv-plan').value;
+            const fee = Number(document.getElementById('pv-fee').value);
+            const password = document.getElementById('pv-password').value.trim();
+            const ownerName = document.getElementById('pv-owner').value.trim();
+            const username = document.getElementById('pv-user').value.trim().toLowerCase();
+
+            if (!/^[a-z0-9][a-z0-9-]{2,29}$/.test(code)) return showError('pv-error', 'Shop code must be 3–30 characters: lowercase letters, numbers and dashes.');
+            if (!ownerName) return showError('pv-error', "Enter the owner's name.");
+            if (!/^[a-z0-9_-]{2,20}$/.test(username)) return showError('pv-error', 'Username: 2–20 lowercase letters or numbers, no spaces.');
+            if (!/^[0-9]{6,12}$/.test(password)) return showError('pv-error', 'PIN must be 6 to 12 digits.');
+            if (tenants.some(t => t.id === code)) return showError('pv-error', 'That shop code is already taken.');
+
+            const btn = document.getElementById('pv-btn');
+            btn.disabled = true; btn.textContent = 'Creating...';
+            try {
+                // 1) Create the shop's login using a separate Firebase instance,
+                //    so the owner stays signed in here.
+                const helper = firebase.apps.find(a => a.name === 'provisioner') || firebase.initializeApp(firebaseConfig, 'provisioner');
+                await helper.auth().setPersistence(firebase.auth.Auth.Persistence.NONE);
+                const cred = await helper.auth().createUserWithEmailAndPassword(`${code}.${username}@${SHOP_DOMAIN}`, password);
+                const ownerUid = cred.user.uid;
+                await helper.auth().signOut();
+
+                // 2) Create the shop record and the owner's admin staff record together.
+                const batch = db.batch();
+                batch.set(db.collection('tenants').doc(code), {
+                    name, plan, monthlyFee: fee,
+                    status: 'active',
+                    txnCount: 0,
+                    createdAt: FV.serverTimestamp()
+                });
+                batch.set(db.collection('tenants').doc(code).collection('staff').doc(ownerUid), {
+                    username, name: ownerName, role: 'admin', active: true,
+                    createdAt: FV.serverTimestamp(), createdBy: 'Matinyo'
+                });
+                await batch.commit();
+
+                closeProvisionModal();
+                alert(`Shop created!\n\nGive these sign-in details to ${ownerName}:\n\nShop code: ${code}\nUsername: ${username}\nPIN: ${password}`);
+            } catch (err) {
+                const c = err.code || '';
+                showError('pv-error', c.includes('email-already-in-use')
+                    ? 'That login already exists. Pick another shop code or username, or delete the old user in Firebase → Authentication → Users first.'
+                    : 'Could not create shop: ' + err.message);
+            } finally {
+                btn.disabled = false; btn.textContent = 'Create Shop Workspace';
+            }
+        }
+    </script>
+</body>
+</html>
