@@ -449,6 +449,27 @@ auth.onAuthStateChanged(async user => {
     start();
 });
 
+// Plan usage list: every shop gets one, listing its switched-on staff and its items.
+// The database uses it to hold each shop to its plan's limits.
+async function buildUsage(id) {
+    const tr = db.collection('tenants').doc(id);
+    const [staff, prods] = await Promise.all([tr.collection('staff').get(), tr.collection('products').get()]);
+    const usage = { staff: {}, products: {}, updatedAt: FV.serverTimestamp() };
+    staff.docs.forEach(d => { const x = d.data(); if (x.active !== false && !x.replacedBy) usage.staff[d.id] = true; });
+    prods.docs.forEach(d => usage.products[d.id] = true);
+    const b = db.batch();
+    b.set(tr.collection('plan').doc('usage'), usage);
+    b.update(tr, { usageReady: true });
+    await b.commit();
+    return usage;
+}
+V.usageBusy = {};
+async function setupUsage() {
+    for (const t of V.tenants.filter(x => !x.usageReady && !V.usageBusy[x.id])) {
+        V.usageBusy[t.id] = true;
+        try { await buildUsage(t.id); } catch (e) { console.warn('usage', t.id, e); delete V.usageBusy[t.id]; }
+    }
+}
 function start() {
     const err = e => toast('⚠️ ' + (e.code === 'permission-denied' ? 'Permission denied — publish the latest Firestore rules.' : e.message), 'err');
     V.unsubs.push(db.collection('platform').doc('config').onSnapshot(s => {
@@ -457,6 +478,7 @@ function start() {
     }, err));
     V.unsubs.push(db.collection('tenants').onSnapshot(s => {
         V.tenants = s.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+        setupUsage();
         renderAll();
         if (V.openShop) renderShopDetail(V.openShop, true);
     }, err));
@@ -698,10 +720,11 @@ async function createShop() {
         b.set(tr, {
             name, planId: plan.id, plan: plan.name, monthlyFee: fee, limits: { maxStaff: Number(plan.maxStaff) || 0, maxProducts: Number(plan.maxProducts) || 0 },
             status: 'active', trial, paidUntil: TS(until), lockAt: TS(trial ? addDays(until, Number(V.config.graceDays) || 0) : addDays(until, 1)),
-            txnCount: 0, ownerName, ownerEmail, ownerPhone: ownerPhone || null, ownerUid, createdAt: FV.serverTimestamp()
+            txnCount: 0, ownerName, ownerEmail, ownerPhone: ownerPhone || null, ownerUid, usageReady: true, createdAt: FV.serverTimestamp()
         });
         b.set(tr.collection('staff').doc(ownerUid), { name: ownerName, loginId: ownerEmail, role: 'admin', active: true, createdAt: FV.serverTimestamp(), createdBy: 'Matinyo' });
         b.set(db.collection('users').doc(ownerUid), { shop: code });
+        b.set(tr.collection('plan').doc('usage'), { staff: { [ownerUid]: true }, products: {}, updatedAt: FV.serverTimestamp() });
         if (ownerPhone) b.set(db.collection('logins').doc(ownerPhone), { email: ownerEmail, shop: code, uid: ownerUid });
         await b.commit();
         await auth.sendPasswordResetEmail(ownerEmail);
@@ -774,6 +797,9 @@ async function saveEdit() {
             const newUid = await makeOwnerLogin(email);
             b.set(tr.collection('staff').doc(newUid), { name: ownerName, loginId: email, role: 'admin', active: true, createdAt: FV.serverTimestamp(), createdBy: 'Matinyo', previousUid: ownerUid || null });
             if (ownerUid) { b.set(tr.collection('staff').doc(ownerUid), { active: false, replacedBy: newUid }, { merge: true }); b.delete(db.collection('users').doc(ownerUid)); }
+            const up = { [`staff.${newUid}`]: true, updatedAt: FV.serverTimestamp() };
+            if (ownerUid) up[`staff.${ownerUid}`] = FV.delete();
+            if (t.usageReady) b.update(tr.collection('plan').doc('usage'), up);
             b.set(db.collection('users').doc(newUid), { shop: id });
             ownerUid = newUid;
         } else if (ownerUid) {
@@ -804,7 +830,7 @@ async function deleteShop(id) {
     try {
         const tr = db.collection('tenants').doc(id);
         const staff = await tr.collection('staff').get();
-        for (const c of ['products', 'costs', 'sales', 'movements', 'entries', 'days', 'meta', 'months', 'payments', 'staff']) {
+        for (const c of ['products', 'costs', 'sales', 'customers', 'serials', 'cashups', 'movements', 'entries', 'days', 'meta', 'months', 'payments', 'plan', 'staff']) {
             const snap = await tr.collection(c).get();
             for (let i = 0; i < snap.docs.length; i += 400) {
                 const b = db.batch(); snap.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit();
