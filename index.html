@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-    <title>Matinyo Control</title>
+    <title>Keep HQ</title>
     <meta name="theme-color" content="#0b0d12">
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;700;800&display=swap" rel="stylesheet">
     <style>
@@ -121,7 +121,7 @@
 <!-- LOGIN -->
 <div id="loginPage">
     <div class="login-card">
-        <div class="logo">MATINYO<span>HQ</span></div>
+        <div class="logo">KEEP<span>HQ</span></div>
         <div class="bar"></div>
         <div class="sub">Vendor control centre — owner access only</div>
         <input type="email" id="lgEmail" class="login-field" placeholder="Email" autocomplete="username" autocapitalize="none">
@@ -136,7 +136,7 @@
 <div id="app">
     <div class="topbar">
         <div class="brand">
-            <div class="t">MATINYO<small>HQ</small></div>
+            <div class="t">KEEP<small>HQ</small></div>
             <div>
                 <button class="icon-btn" onclick="location.reload()" title="Refresh">🔄</button>
                 <button class="icon-btn" onclick="auth.signOut()" title="Sign out">⏻</button>
@@ -712,7 +712,7 @@ async function createShop() {
     const btn = $('nBtn'); btn.disabled = true; btn.textContent = 'Creating...';
     try {
         if (ownerPhone && (await db.collection('logins').doc(ownerPhone).get()).exists) return err('That phone number is already used by another account.');
-        const ownerUid = await makeOwnerLogin(ownerEmail);
+        const ownerUid = await makeOwnerLogin(ownerEmail, name);
         const trial = $('nStart').value === 'trial';
         const until = trial ? addDays(new Date(), Number(V.config.trialDays) || 0) : new Date();
         const b = db.batch();
@@ -722,7 +722,7 @@ async function createShop() {
             status: 'active', trial, paidUntil: TS(until), lockAt: TS(trial ? addDays(until, Number(V.config.graceDays) || 0) : addDays(until, 1)),
             txnCount: 0, ownerName, ownerEmail, ownerPhone: ownerPhone || null, ownerUid, usageReady: true, createdAt: FV.serverTimestamp()
         });
-        b.set(tr.collection('staff').doc(ownerUid), { name: ownerName, loginId: ownerEmail, role: 'admin', active: true, createdAt: FV.serverTimestamp(), createdBy: 'Matinyo' });
+        b.set(tr.collection('staff').doc(ownerUid), { name: ownerName, loginId: ownerEmail, role: 'admin', active: true, createdAt: FV.serverTimestamp(), createdBy: 'Keep' });
         b.set(db.collection('users').doc(ownerUid), { shop: code });
         b.set(tr.collection('plan').doc('usage'), { staff: { [ownerUid]: true }, products: {}, updatedAt: FV.serverTimestamp() });
         if (ownerPhone) b.set(db.collection('logins').doc(ownerPhone), { email: ownerEmail, shop: code, uid: ownerUid });
@@ -733,15 +733,17 @@ async function createShop() {
         if (!trial) { toast('✅ Shop created — now record the first payment'); setTimeout(() => openPay(code), 400); }
         else await afterInvite(t, true);
     } catch (e) {
-        err((e.code || '').includes('email-already-in-use') ? 'That email already has a Matinyo account. Use another email, or delete the old user in Firebase → Authentication → Users.' : 'Could not create shop: ' + e.message);
+        err((e.code || '').includes('email-already-in-use') ? 'That email already has a Keep account. Use another email, or delete the old user in Firebase → Authentication → Users.' : 'Could not create shop: ' + e.message);
     } finally { btn.disabled = false; btn.textContent = 'Create shop'; }
 }
 // Creates a Firebase login with a random temporary password (you stay signed in here)
-async function makeOwnerLogin(email) {
+async function makeOwnerLogin(email, shopName) {
     const helper = firebase.apps.find(a => a.name === 'provisioner') || firebase.initializeApp(firebaseConfig, 'provisioner');
     await helper.auth().setPersistence(firebase.auth.Auth.Persistence.NONE);
     const temp = Array.from(crypto.getRandomValues(new Uint8Array(18))).map(b => b.toString(36)).join('');
     const cred = await helper.auth().createUserWithEmailAndPassword(email, temp);
+    // The shop name appears in the "set your PIN" email (%DISPLAY_NAME%)
+    if (shopName) await cred.user.updateProfile({ displayName: shopName }).catch(() => {});
     await helper.auth().signOut();
     return cred.user.uid;
 }
@@ -752,7 +754,7 @@ async function afterInvite(t, isNew) {
 }
 function waOwner(id, isNew) {
     const t = V.tenants.find(x => x.id === id) || {}; const first = String(t.ownerName || '').split(' ')[0];
-    const text = `Habari ${first}! ${isNew ? `Your shop *${t.name}* is ready on Matinyo POS.` : `Matinyo POS — *${t.name}*`}\n\n1. Open the email we sent to ${t.ownerEmail} (check spam) and set your PIN.\n2. Open the till: ${V.config.tillUrl}\n3. Sign in with your email or this phone number, and your PIN.`;
+    const text = `Habari ${first}! ${isNew ? `Your shop *${t.name}* is ready on Keep POS.` : `Keep POS — *${t.name}*`}\n\n1. Open the email we sent to ${t.ownerEmail} (check spam) and set your PIN.\n2. Open the till: ${V.config.tillUrl}\n3. Sign in with your email or this phone number, and your PIN.`;
     window.open(`https://wa.me/${t.ownerPhone}?text=${encodeURIComponent(text)}`, '_blank');
 }
 async function resendPin(id) {
@@ -794,8 +796,8 @@ async function saveEdit() {
         const b = db.batch();
         if (emailChanged) {
             // New owner login for the new email; the old login is switched off.
-            const newUid = await makeOwnerLogin(email);
-            b.set(tr.collection('staff').doc(newUid), { name: ownerName, loginId: email, role: 'admin', active: true, createdAt: FV.serverTimestamp(), createdBy: 'Matinyo', previousUid: ownerUid || null });
+            const newUid = await makeOwnerLogin(email, name);
+            b.set(tr.collection('staff').doc(newUid), { name: ownerName, loginId: email, role: 'admin', active: true, createdAt: FV.serverTimestamp(), createdBy: 'Keep', previousUid: ownerUid || null });
             if (ownerUid) { b.set(tr.collection('staff').doc(ownerUid), { active: false, replacedBy: newUid }, { merge: true }); b.delete(db.collection('users').doc(ownerUid)); }
             const up = { [`staff.${newUid}`]: true, updatedAt: FV.serverTimestamp() };
             if (ownerUid) up[`staff.${ownerUid}`] = FV.delete();
@@ -815,7 +817,7 @@ async function saveEdit() {
         if (emailChanged) { await auth.sendPasswordResetEmail(email); closeSheets(); await afterInvite({ ...t, name, ownerName, ownerEmail: email, ownerPhone: phone }, false); }
         else { closeSheets(); toast('✅ Saved'); }
     } catch (e) {
-        toast((e.code || '').includes('email-already-in-use') ? 'That email already has a Matinyo account.' : e.message, 'err');
+        toast((e.code || '').includes('email-already-in-use') ? 'That email already has a Keep account.' : e.message, 'err');
     } finally { btn.disabled = false; btn.textContent = '💾 Save changes'; }
 }
 
@@ -935,7 +937,7 @@ async function receiptPdf(pid, share) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a5' }), W = 148;
     doc.setFillColor(11, 13, 18); doc.rect(0, 0, W, 30, 'F');
-    doc.setTextColor(255, 199, 44); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('MATINYO', 12, 15);
+    doc.setTextColor(255, 199, 44); doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.text('KEEP', 12, 15);
     doc.setTextColor(96, 165, 250); doc.setFontSize(9); doc.text('POS SUBSCRIPTION', 12, 22);
     doc.setTextColor(255, 255, 255); doc.setFontSize(11); doc.text('RECEIPT', W - 12, 15, { align: 'right' });
     doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text(p.receiptNo || '', W - 12, 22, { align: 'right' });
@@ -960,7 +962,7 @@ async function receiptPdf(pid, share) {
     if (share) {
         const t = V.tenants.find(x => x.id === p.shop);
         if (t && t.ownerPhone && await dialog('Send the payment confirmation to the owner on WhatsApp?', { yes: '📲 WhatsApp', no: 'No', color: 'var(--pos)' })) {
-            const text = `Asante! We received ${fmt(p.amount)} for *${p.shopName}* (${p.months} month${p.months > 1 ? 's' : ''}).\nReceipt: ${p.receiptNo}\nYour Matinyo POS is active until ${pretty(p.periodTo)}.`;
+            const text = `Asante! We received ${fmt(p.amount)} for *${p.shopName}* (${p.months} month${p.months > 1 ? 's' : ''}).\nReceipt: ${p.receiptNo}\nYour Keep POS is active until ${pretty(p.periodTo)}.`;
             window.open(`https://wa.me/${t.ownerPhone}?text=${encodeURIComponent(text)}`, '_blank');
         }
     }
